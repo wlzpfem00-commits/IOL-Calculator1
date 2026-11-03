@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: iol-calculator-demo
+    runtime: python
+    plan: free
+    buildCommand: echo "No dependencies required"
+    startCommand: python server/main.py
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: IOL_HOST
+        value: 0.0.0.0
+      - key: PYTHON_VERSION
+        value: 3.12.8

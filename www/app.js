@@ -1,0 +1,49 @@
+'use strict';
+const CONFIG=window.IOL_CONFIG;
+const $=id=>document.getElementById(id);
+const $$=s=>[...document.querySelectorAll(s)];
+const STORE='iol-calculator-prototype-records-v1';
+const API_SETTINGS='iol-calculator-api-base-v1';
+let mobileStep=0;
+let activeView='input';
+let formulas=[...CONFIG.initialFormulas];
+function safeText(text){return String(text??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function buildFields(eye){const root=$(eye+'Fields');root.innerHTML='';CONFIG.measurements.forEach((m,i)=>{const line=document.createElement('div');line.className='measure-row'+(m.optional&&CONFIG.measurements[i-1]&&!CONFIG.measurements[i-1].optional?' optional-first':'');const label=document.createElement('label');label.htmlFor=eye+'-'+m.key;label.textContent=m.label;const inp=document.createElement('input');Object.assign(inp,{id:eye+'-'+m.key,type:'number',step:String(m.step),placeholder:m.required?'필수':'선택',value:m.default??''});inp.min=String(m.min);inp.max=String(m.max);inp.addEventListener('input',()=>{inp.classList.remove('invalid');updateMean(eye)});const unit=document.createElement('span');unit.className='unit';unit.textContent=m.unit;line.append(label,inp,unit);root.append(line)});const mean=document.createElement('div');mean.className='mean';mean.innerHTML='<span>Mean K (자동 계산)</span><strong id="'+eye+'-mean">—</strong>';root.append(mean)}
+function updateMean(eye){let a=Number($(eye+'-k1').value),b=Number($(eye+'-k2').value);$(eye+'-mean').textContent=$(eye+'-k1').value!==''&&$(eye+'-k2').value!==''?((a+b)/2).toFixed(2)+' D':'—'}
+function renderFormulas(){const root=$('formulaList');root.innerHTML='';CONFIG.formulas.forEach((f,i)=>{const l=document.createElement('label');const cb=document.createElement('input');cb.type='checkbox';cb.checked=formulas.includes(f);cb.addEventListener('change',()=>{formulas=CONFIG.formulas.filter(x=>$$('#formulaList input').find(z=>z.dataset.formula===x)?.checked)});cb.dataset.formula=f;l.append(cb,document.createTextNode(f));root.append(l)})}
+function readForm(){const fields=['doctor','patient','patientId','lensFactor','aConstant','constantType','targetOD','targetOS'];const d={};fields.forEach(f=>d[f]=$(f).value);d.eyes={};['od','os'].forEach(e=>{d.eyes[e]={};CONFIG.measurements.forEach(m=>d.eyes[e][m.key]=$(e+'-'+m.key).value)});d.formulas=[...formulas];return d}
+function applyForm(d){['doctor','patient','patientId','lensFactor','aConstant','constantType','targetOD','targetOS'].forEach(f=>{if(d[f]!==undefined)$(f).value=d[f]});['od','os'].forEach(e=>CONFIG.measurements.forEach(m=>{if(d.eyes?.[e]?.[m.key]!==undefined)$(e+'-'+m.key).value=d.eyes[e][m.key]}));formulas=CONFIG.formulas.filter(f=>d.formulas?.includes(f));renderFormulas();['od','os'].forEach(updateMean)}
+function eyeFilled(e){return CONFIG.measurements.filter(m=>m.required).some(m=>$(e+'-'+m.key).value!=='')}
+function validate(){let errors=[];$$('input[type=number]').forEach(el=>el.classList.remove('invalid'));['lensFactor','aConstant'].forEach(k=>{const el=$(k);if(el.value!==''&&(Number(el.value)<Number(el.min)||Number(el.value)>Number(el.max))){el.classList.add('invalid');errors.push(k+' 범위 오류')}});for(const e of ['od','os']){const selected=eyeFilled(e);for(const m of CONFIG.measurements){const el=$(e+'-'+m.key),v=el.value;if((selected&&m.required&&v==='')||(v!==''&&(!Number.isFinite(Number(v))||Number(v)<m.min||Number(v)>m.max))){el.classList.add('invalid');errors.push(e.toUpperCase()+' '+m.label)}}}if(!eyeFilled('od')&&!eyeFilled('os'))errors.push('OD 또는 OS 중 한쪽 이상의 필수 계측값을 입력하세요.');if(!formulas.length)errors.push('계산 공식을 하나 이상 선택하세요.');for(const id of ['targetOD','targetOS']){const val=$(id).value;if(val===''||!Number.isFinite(Number(val))){$(id).classList.add('invalid');errors.push(id+' 목표 굴절력 오류')}}return errors}
+function pair(label,val){return '<div><span>'+safeText(label)+'</span><strong>'+safeText(val||'—')+'</strong></div>'}
+function renderResult(){const d=readForm();$('resultPatient').innerHTML=pair('Doctor',d.doctor)+pair('Patient / Alias',d.patient)+pair('Patient ID',d.patientId)+pair('OD Target',d.targetOD+' D')+pair('OS Target',d.targetOS+' D')+pair('Constant Type',d.constantType);$('resultBiometry').innerHTML=['od','os'].map(e=>'<h3>'+e.toUpperCase()+'</h3>'+CONFIG.measurements.map(m=>pair(m.label,d.eyes[e][m.key]!==''?d.eyes[e][m.key]+' '+m.unit:'—')).join('')).join('');$('resultFormulas').textContent=formulas.join(' · ');$('formulaResults').innerHTML=formulas.map(f=>'<tr><td>'+safeText(f)+'</td><td>—</td><td>—</td><td>검증된 계산 엔진 필요</td></tr>').join('')}
+async function requestServerCalculation(){
+  const status=$('engineStatus');status.textContent='서버 연결 및 입력값 검사 중…';
+  try{
+    const response=await window.IOL_API.calculate(readForm());
+    if(response.clinicalReady!==false)throw Error('검증되지 않은 서버 응답: clinicalReady 필드 확인 필요');
+    const rows=[];
+    for(const side of ['od','os']){for(const result of (response.results?.[side]||[])){
+      rows.push('<tr><td>'+safeText(side.toUpperCase()+' · '+result.formula)+'</td><td>—</td><td>—</td><td>'+safeText(result.reason||result.status)+'</td></tr>');
+    }}
+    $('formulaResults').innerHTML=rows.join('');
+    status.textContent='서버 연결 성공 · 현재 검증된 공식 계산 엔진 없음';
+  }catch(error){
+    status.textContent='서버 연결 실패: '+String(error.message)+' · 계산값 표시 안 함';
+  }
+}
+function changeView(view){activeView=view;['input','result','history','settings'].forEach(v=>$(v+'View').hidden=v!==view);$('steps').hidden=view!=='input'}
+function empty(){const data={doctor:'',patient:'',patientId:'',lensFactor:'',aConstant:'',constantType:'Personal Constant',targetOD:'-0.25',targetOS:'-0.25',eyes:{od:{},os:{}},formulas:[...CONFIG.initialFormulas]};applyForm(data);show('input')}
+function show(v){activeView=v;for(const n of ['input','result','history','settings'])$(n+'View').hidden=(n!==v);$('steps').style.display=v==='input'?'':'none';if(v==='input')setMobileStep(mobileStep);window.scrollTo?.(0,0)}
+function setMobileStep(n){mobileStep=Math.min(4,Math.max(0,n));$$('.step').forEach((b,i)=>b.classList.toggle('selected',i===mobileStep));$$('.workspace .section').forEach(x=>x.classList.remove('current'));if(mobileStep===2||mobileStep===3){document.querySelector('.measures').classList.add('current');$$('.eye').forEach(x=>x.classList.toggle('current',Number(x.dataset.step)===mobileStep))}else{const el=document.querySelector('.workspace .section[data-step="'+mobileStep+'"]');if(el)el.classList.add('current')} $('prevBtn').disabled=mobileStep===0;$('nextBtn').textContent=mobileStep===4?'결과 화면 보기':'다음'}
+function save(){const d=readForm();const rows=getRows();const id=(d.patientId||'TEST')+'-'+Date.now();rows.unshift({id,created:new Date().toISOString(),data:d});try{localStorage.setItem(STORE,JSON.stringify(rows.slice(0,50)));alert('테스트 데이터를 이 기기에 저장했습니다. 실제 환자 정보는 저장하지 마세요.')}catch(e){alert('저장할 수 없습니다: '+e.message)}}
+function getRows(){try{const d=JSON.parse(localStorage.getItem(STORE)||'[]');return Array.isArray(d)?d:[]}catch{return []}}
+function history(){const rows=getRows();$('historyItems').innerHTML=rows.length?rows.map(r=>'<div class="history-item"><div><strong>'+safeText(r.data.patientId||'(ID 없음)')+'</strong><div class="help">'+safeText(r.created)+'</div></div><button data-id="'+safeText(r.id)+'">불러오기</button></div>').join(''):'<p>저장된 테스트 기록이 없습니다.</p>';$$('#historyItems button').forEach(b=>b.onclick=()=>{const row=getRows().find(r=>r.id===b.dataset.id);if(row){applyForm(row.data);show('input')}})}
+function downloadJSON(){const blob=new Blob([JSON.stringify({schemaVersion:1,exported:new Date().toISOString(),data:readForm()},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='iol-test-input-'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function boot(){
+  try{window.IOL_API.setBase(localStorage.getItem(API_SETTINGS)||'')}catch(e){}
+  $('apiBase').value=window.IOL_API.baseUrl;
+  $('connectBtn').onclick=async()=>{const el=$('connectionStatus');el.textContent='확인 중…';try{window.IOL_API.setBase($('apiBase').value);const r=await window.IOL_API.health();localStorage.setItem(API_SETTINGS,window.IOL_API.baseUrl);el.textContent=r.status==='ok'?'서버 연결 성공 (임상 계산 기능 비활성)':'예상하지 못한 서버 응답'}catch(e){el.textContent='연결 실패: '+e.message}};
+['od','os'].forEach(buildFields);renderFormulas();setMobileStep(0);$$('.step').forEach(btn=>btn.onclick=()=>setMobileStep(Number(btn.dataset.step)));$('prevBtn').onclick=()=>setMobileStep(mobileStep-1);$('nextBtn').onclick=()=>mobileStep===4?$('calculateBtn').click():setMobileStep(mobileStep+1);$('calculateBtn').onclick=()=>{const errs=validate();if(errs.length){alert('입력 확인:\n• '+errs.join('\n• '));return}renderResult();show('result');requestServerCalculation()};$('backBtn').onclick=$('editBtn').onclick=()=>show('input');$('printBtn').onclick=()=>window.print();$('newBtn').onclick=empty;$('saveBtn').onclick=save;$('loadBtn').onclick=()=>{history();show('history')};$('exportBtn').onclick=downloadJSON;$('navHistory').onclick=()=>{history();show('history')};$('navSettings').onclick=()=>show('settings');$('clearHistory').onclick=()=>{if(confirm('이 기기에 저장한 테스트 기록을 모두 삭제할까요?')){localStorage.removeItem(STORE);history()}};$('importBtn').onclick=()=>$('importFile').click();$('importFile').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;try{const j=JSON.parse(await file.text());if(j.schemaVersion!==1||!j.data?.eyes||!Array.isArray(j.data.formulas))throw new Error('지원하지 않는 데이터 구조');applyForm(j.data);show('input')}catch(err){alert('파일을 가져올 수 없습니다: '+err.message)}e.target.value=''};if('serviceWorker'in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('service-worker.js').catch(()=>{});}
+// No clinical calculation formula is implemented in this prototype.
+boot();

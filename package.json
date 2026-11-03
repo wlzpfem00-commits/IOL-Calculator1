@@ -1,0 +1,6 @@
+{
+ "name":"iol-calculator-prototype","version":"0.2.1","private":true,"description":"Research-only UI prototype; NOT for clinical use","main":"desktop/main.cjs",
+ "scripts":{"web":"npx --yes http-server www -a 127.0.0.1 -p 8080 -c-1","desktop":"electron .","desktop:package":"electron-builder --win","mobile:sync":"cap sync","mobile:android":"cap open android","mobile:ios":"cap open ios"},
+ "devDependencies":{"electron":"^33.0.0","electron-builder":"^25.0.0","@capacitor/cli":"^6.0.0","@capacitor/core":"^6.0.0","@capacitor/android":"^6.0.0","@capacitor/ios":"^6.0.0"},
+ "build":{"appId":"com.example.iolprototype","productName":"IOL Calculator Prototype","files":["www/**/*","desktop/**/*","package.json"],"win":{"target":"nsis"}}
+}

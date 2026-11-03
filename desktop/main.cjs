@@ -1,0 +1,2 @@
+const {app,BrowserWindow}=require('electron');const path=require('node:path');
+app.whenReady().then(()=>{const win=new BrowserWindow({width:1360,height:880,minWidth:950,minHeight:650,webPreferences:{nodeIntegration:false,contextIsolation:true,sandbox:true}});win.loadFile(path.join(__dirname,'../www/index.html'));win.removeMenu();app.on('activate',()=>{if(BrowserWindow.getAllWindows().length===0)win.show()})});app.on('window-all-closed',()=>{if(process.platform!=='darwin')app.quit()});
